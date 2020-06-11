@@ -1,0 +1,6 @@
+# data folder
+data/*
+
+# MR Sublime workspace
+cati_incentives.sublime-project
+cati_incentives.sublime-workspace
