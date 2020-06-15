@@ -448,7 +448,7 @@ pause
 		ytitle("") 																///
 		legend(off) 															//
 	
-	graph export "cati_rr_lmic_meta.png", replace
+	graph export "`location'/output/cati_rr_lmic_meta.png", replace
 
 
 **EOF**
