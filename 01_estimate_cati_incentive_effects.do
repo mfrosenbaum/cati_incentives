@@ -50,6 +50,7 @@ pause on
 **2. Download data
 	*Check if location exists
 	cap mkdir 			"`location'/data/"
+	cap mkdir 			"`location'/output/"
 	copy "`url'" 		"`location'/data/response_rates.csv", replace
 
 
@@ -143,7 +144,7 @@ pause on
 	*Format author
 	replace author 			= "(Leo et. al., 2015)" 				if id == 11
 	replace author 			= "(Gibson et. al., 2019)" 				if id == 26
-	replace author 			= "(Ballivan, Azevedo, Durbin, 2015)" 	if id == 61
+	replace author 			= "(Ballivan, Azevedo & Durbin, 2015)" 	if id == 61
 
 	*Replace incentives to monetary values
 	replace treatment 		= "0"		if treatment == "Control" | treatment == ""
@@ -270,7 +271,7 @@ pause
 **1. Calculate coefficient estimates
 	*Create matrix of IDs and Standard errors
 	distinct id country trt, joint
-	loc length = `r(ndistinct)' - 6
+	loc length = `r(ndistinct)' - 7
 	loc matlen = `length' + 4 													// 1 for each study, 1 gap, 3 margins ($0.50, $1.00, $2.00) 
 	mat A = J(`matlen', 6, .)													// r = studies, c = beta, SE, n 
 
@@ -312,10 +313,10 @@ pause
 		
 				* LPM of treatment effect on completion rate
 				di "Study = `study'; Country = `country'"
-				reg complete i.trt_factor if id == `study' & country == `country', vce(r)
+				reg complete i.trt_factor if id == `study' & country == `country' & mode == `mode', vce(r)
 
 				*Collect treatments
-				levelsof trt_factor if id == `study' & country == `country', loc(treatments) 
+				levelsof trt_factor if id == `study' & country == `country' & mode == `mode', loc(treatments) 
 				loc j = 1 																// start treatment counter by study
 				foreach treatment of local treatments{
 
@@ -329,7 +330,6 @@ pause
 						
 						if _b[`treatment'.trt_factor] < 0 {
 							di "`e(cmdline)'"
-							pause
 						}
 
 						mat A[`i', 1] = _b[`treatment'.trt_factor]
@@ -357,19 +357,23 @@ pause
 
 **2. Calculate pooled effects and estimates
 	*LPM of treatments with study and country FEs
-	reg complete trt trt_sq i.id, vce(cluster id)
+	reg complete c.trt##c.trt i.id, vce(cluster id)
 	
 	loc ++i
 	foreach marginal in 0.5 1 2.5 {
 
 		*Collect marginal at pooled treatment value
-		margins, dydx(trt) 
-		mat E_`i' = r(table)
+		*margins, dydx(trt) at(trt = `marginal')
+		lincom `marginal'*trt + `marginal'*`marginal'*c.trt#c.trt
+		*mat E_`i' = r(table)
 
+		mat A[`i', 1] = `r(estimate)' 													// beta
+		mat A[`i', 2] = `r(se)'		 													// SE
+		
 		*Save values from margins
-		mat A[`i', 1] = E_`i'[1, 1]*`marginal' 											// beta
-		mat A[`i', 2] = E_`i'[2, 1] 													// SE
-		mat A[`i', 3] = `r(N)'
+		*mat A[`i', 1] = E_`i'[1, 1] 													// beta
+		*mat A[`i', 2] = E_`i'[2, 1] 													// SE
+		*mat A[`i', 3] = `r(N)'
 		loc ++i
 	}
 	// end for each margin in 0.5 1 2.5
@@ -384,56 +388,67 @@ pause
 	*Create locals for saving twoway output
 	loc yscale = `=_N'
 	loc xlab 																	// init empty
-	loc i = 0
+	loc i = 0 
 	forval j = 1(1)`study_n' {
 
 		* Skip control for labels
 		if "`trt_`j''" == "0" continue
 
 		loc place = `yscale' - `i'
+		loc place = (`place' * 2) - 1 // add spacing for larger text
 
 		*Format treatment price
-		loc price = "`: di %9.2f `trt_`j''"
-		loc price = "$" + subinstr("`price'", char(9), "", .)
+		loc price = "`: di %9.2f `trt_`j'''"
+		loc price = "\$" + subinstr("`price'", "     ", "", .)
 		
 		* Define  local labels
-		loc xlab `"`xlab' `place' `""`auth_`j''"  "`mode_`j'' - `loc_`j'' - `price''""' "' /* " //sublime syntax highlighting fix */
+		loc xlab `"`xlab' `place' `""`auth_`j''"  "`mode_`j'' - `loc_`j'' - `price'""' "' /* " //sublime syntax highlighting fix */
 		loc ++i
 	}
 
-	loc --place
-	loc --place
+	* Addded pooled outcomes
+	loc place = `place' - 4
 	loc xlab `"`xlab' `place' "Pooled effects - $0.50""' 
-	loc --place
+	loc place = `place' - 2
 	loc xlab `"`xlab' `place' "Pooled effects - $1.00""'
-	loc --place
+	loc place = `place' - 2
 	loc xlab `"`xlab' `place' "Pooled effects - $2.50""' 
 
 	*Create IDs
 	gen id = `=_N' - _n + 1
+		replace id = id * 2 												   // format for y-axis spacing
+		replace id = id -1  												   // shift for twoway margins
 	gen lo_2se = beta - 1.96 * se
 	gen hi_2se = beta + 1.96 * se
+
+	*Create pooled labels
+	gen double mlabel = beta*100
+		tostring mlabel, replace force format(%9.1f)
+	replace mlabel = mlabel + "%"
 
 	*Plot twoway
 	set scheme s1color
 	tw ///
-		(scatter 	id 	beta 			if !mi(country), 						///
-			m(Dh) mlc("0 110 185")) 											/// Point 
-		(rspike 	lo_2se hi_2se id	if !mi(country), 						///
-			lc("0 110 185") horizontal) 										/// Bar
-		(scatter 	id 	beta 			if mi(country), 						///
-			m(Dh) mlc("129 181 60")) 											/// Pooled Point 
-		(rspike 	lo_2se hi_2se id	if mi(country), 						///
-			lc("129 181 60") horizontal),										/// Pooled Bar
+		(scatter 	id 	beta 			if !mi(country), 						/// Point
+			m(Dh) mlc("0 110 185") 												///
+			mlabel(mlabel) mlabp(2) mlabs(*.6) mlabc("0 110 185"))				///  
+		(rspike 	lo_2se hi_2se id	if !mi(country), 						/// CI
+			lc("0 110 185") horizontal) 										/// 
+		(scatter 	id 	beta 			if mi(country), 						/// Pooled Point
+			m(Dh) mlc("129 181 60") 											/// 
+			mlabel(mlabel) mlabp(2) mlabs(*.6) mlabc("129 181 60"))				///   
+		(rspike 	lo_2se hi_2se id	if mi(country), 						/// Pooled CI
+			lc("129 181 60") horizontal),										/// 
 		xline(0)	 															/// Line of no effect
-		ysca(r(0 `=_N'))														/// Yscale
-		ylab(`xlab', angle(0) labsize(tiny))									/// Y labels
+		ysca(r(0 `=_N*2'))														/// Yscale
+		ylab(`xlab', angle(0) labsize(*.5))										/// Y labels
 		xsca(r(-0.05 0.15))														/// X scale
-		xlab(-0.05 "-5%" 0 "0%" 0.05 "5%" 0.10 "10%" 0.15 "15%") 				/// X labels
-		xtitle("Completion rate in percentage points") 							/// Ytitle
+		xlab(-.10 "-10%" -0.05 "-5%" 0 "0%" 0.05 "5%" 0.10 "10%" 0.15 "15%") 	/// X labels
+		xtitle("Response rate in percentage points") 							/// Ytitle
 		ytitle("") 																///
 		legend(off) 															//
-	graph display, margins(l+10)
+	
+	graph export "cati_rr_lmic_meta.png", replace
 
 
 **EOF**
