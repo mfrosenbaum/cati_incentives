@@ -54,7 +54,7 @@ pause on
 	copy "`url'" 		"`location'/data/response_rates.csv", replace
 
 
-**3. Select data
+**3. Load data and cleaning
 	import delim using 	"`location'/data/response_rates.csv", varn(1) stripq(yes) clear
 
 	/*
@@ -173,6 +173,7 @@ pause on
 
 
 **C. Compute Inflation adjustment of USD
+	// No PPP adjustment because not in LCUs. Instead inflation adjust per Steve call 6/16
 	loc adj_2012	1.12
 	loc adj_2013 	1.11
 	loc adj_2014	1.09
@@ -185,10 +186,6 @@ pause on
 	forval year = 2012(1)2019 {
 		replace treatment = treatment * `adj_`year'' if research_year == `year'
 	}
-
-di in red "Replace to PPP adjustment"
-pause
-
 
 
 ***************************************
@@ -272,8 +269,8 @@ pause
 	*Create matrix of IDs and Standard errors
 	distinct id country trt, joint
 	loc length = `r(ndistinct)' - 7
-	loc matlen = `length' + 4 													// 1 for each study, 1 gap, 3 margins ($0.50, $1.00, $2.00) 
-	mat A = J(`matlen', 6, .)													// r = studies, c = beta, SE, n 
+	loc matlen = `length' 														// 1 for each study, 1 gap, 3 margins ($0.50, $1.00, $2.00) 
+	mat A = J(`matlen', 7, .)													// r = studies, c = beta, SE, n 
 
 	*Prep treatment variable as factor
 	gen trt_factor = string(trt)
@@ -326,6 +323,10 @@ pause
 						continue
 					}
 
+					*Save treatment in USD
+					qui su trt if trt_factor == `treatment' & country == `country' & mode == `mode' & id == `study'
+					loc trt_val = `r(mean)'
+
 					if `j' > 1 {
 						
 						if _b[`treatment'.trt_factor] < 0 {
@@ -338,6 +339,7 @@ pause
 						mat A[`i', 4] = `study'
 						mat A[`i', 5] = `mode'
 						mat A[`i', 6] = `country'
+						mat A[`i', 7] = `trt_val'
 						loc ++i 														// advance row counter
 						loc ++j 														// advance treatment counter
 					}
@@ -359,31 +361,27 @@ pause
 	*LPM of treatments with study and country FEs
 	reg complete c.trt##c.trt i.id, vce(cluster id)
 	
-	loc ++i
-	foreach marginal in 0.5 1 2.5 {
+	*Save results
+	loc i = 1
+	mat B = J(101, 7, .)
+	forval marginal = 0(0.05)5 {
 
-		*Collect marginal at pooled treatment value
-		*margins, dydx(trt) at(trt = `marginal')
-		lincom `marginal'*trt + `marginal'*`marginal'*c.trt#c.trt
-		*mat E_`i' = r(table)
-
-		mat A[`i', 1] = `r(estimate)' 													// beta
-		mat A[`i', 2] = `r(se)'		 													// SE
-		
-		*Save values from margins
-		*mat A[`i', 1] = E_`i'[1, 1] 													// beta
-		*mat A[`i', 2] = E_`i'[2, 1] 													// SE
-		*mat A[`i', 3] = `r(N)'
+		qui lincom `marginal'*trt + `marginal'*`marginal'*c.trt#c.trt
+		mat B[`i', 1] = `r(estimate)' 													// beta
+		mat B[`i', 2] = `r(se)'		 													// SE
+		mat B[`i', 7] = `marginal'
 		loc ++i
 	}
-	// end for each margin in 0.5 1 2.5
+	// end for each margin in 0.5 1 2.5	
 
+	*Combine matricies
+	mat C = A \ B
 
 **3. Save output using twoway
 	*Make mat
 	drop _all
-	svmat A
-	ren (A1 A2 A3 A4 A5 A6) (beta se n study mode country)
+	svmat C
+	ren (C1 C2 C3 C4 C5 C6 C7) (beta se n study mode country treatment)
 
 	*Create locals for saving twoway output
 	loc yscale = `=_N'
@@ -415,9 +413,6 @@ pause
 	loc xlab `"`xlab' `place' "Pooled effects - $2.50""' 
 
 	*Create IDs
-	gen id = `=_N' - _n + 1
-		replace id = id * 2 												   // format for y-axis spacing
-		replace id = id -1  												   // shift for twoway margins
 	gen lo_2se = beta - 1.96 * se
 	gen hi_2se = beta + 1.96 * se
 
@@ -426,29 +421,21 @@ pause
 		tostring mlabel, replace force format(%9.1f)
 	replace mlabel = mlabel + "%"
 
+
 	*Plot twoway
 	set scheme s1color
 	tw ///
-		(scatter 	id 	beta 			if !mi(country), 						/// Point
+		(scatter  	beta treatment 			if !mi(country), 					/// Point
 			m(Dh) mlc("0 110 185") 												///
-			mlabel(mlabel) mlabp(2) mlabs(*.6) mlabc("0 110 185"))				///  
-		(rspike 	lo_2se hi_2se id	if !mi(country), 						/// CI
-			lc("0 110 185") horizontal) 										/// 
-		(scatter 	id 	beta 			if mi(country), 						/// Pooled Point
-			m(Dh) mlc("129 181 60") 											/// 
-			mlabel(mlabel) mlabp(2) mlabs(*.6) mlabc("129 181 60"))				///   
-		(rspike 	lo_2se hi_2se id	if mi(country), 						/// Pooled CI
-			lc("129 181 60") horizontal),										/// 
-		xline(0)	 															/// Line of no effect
-		ysca(r(0 `=_N*2'))														/// Yscale
-		ylab(`xlab', angle(0) labsize(*.5))										/// Y labels
-		xsca(r(-0.05 0.15))														/// X scale
-		xlab(-.10 "-10%" -0.05 "-5%" 0 "0%" 0.05 "5%" 0.10 "10%" 0.15 "15%") 	/// X labels
-		xtitle("Response rate in percentage points") 							/// Ytitle
-		ytitle("") 																///
+		mlabel(mlabel) mlabp(2) mlabs(*.6) mlabc("0 110 185"%70))			///  
+		(line 		beta treatment 			if mi(country)) 					///
+		(rarea     lo_2se hi_2se treatment  if mi(country), 					///
+			fcolor(grey%20)),
+		ytitle("Effect of Incentives on Response Rate") 						/// Ytitle
+		ytitle("Incentive Size (2020 USD)") 									///
 		legend(off) 															//
 	
-	graph export "`location'/output/cati_rr_lmic_meta.png", replace
+
 
 
 **EOF**
