@@ -430,11 +430,12 @@ pause on
 		mlabel(mlabel) mlabp(2) mlabs(*.6) mlabc("0 110 185"%70))			///  
 		(line 		beta treatment 			if mi(country)) 					///
 		(rarea     lo_2se hi_2se treatment  if mi(country), 					///
-			fcolor(grey%20)),
+			fcolor(grey%20)), 													///
 		ytitle("Effect of Incentives on Response Rate") 						/// Ytitle
-		ytitle("Incentive Size (2020 USD)") 									///
+		xtitle("Incentive Size (2020 USD)") 									///
 		legend(off) 															//
 	
+	graph export "`location'/output/cati_rr_lmic_meta.png", replace
 
 
 
