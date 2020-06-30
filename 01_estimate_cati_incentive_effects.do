@@ -188,6 +188,7 @@ pause on
 	}
 
 
+
 ***************************************
 * 2. Create dataset
 ***************************************
@@ -457,7 +458,8 @@ pause on
 			lwidth(thick) lcolor("129 181 60%70"))								///
 		`cmd_tw',																/// Load dynamically assigned points
 		xlab(0 "\$0" 1 "\$1.00" 2 "\$2.00" 3 "\$3.00" 4 "\$4.00" 5 "\$5.00" 6 "\$6.00") ///
-		ylab(-.05 "-5%" 0 "0%" .05 "5%" .10 "10%" .15 "15%") 					///
+		ylab(-.05 "-5%" 0 "0%" .05 "5%" .10 "10%") 								///
+		yline(0, lcolor(gray%70))												///
 		ytitle("Effect of Incentives on Response Rate") 						/// Ytitle
 		xtitle("Incentive Size (2020 USD)") 									///
 		legend(off) 															//
