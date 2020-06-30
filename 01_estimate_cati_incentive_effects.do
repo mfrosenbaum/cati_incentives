@@ -363,8 +363,8 @@ pause on
 	
 	*Save results
 	loc i = 1
-	mat B = J(101, 7, .)
-	forval marginal = 0(0.05)5 {
+	mat B = J(141, 7, .)
+	forval marginal = 0(0.05)7 {
 
 		qui lincom `marginal'*trt + `marginal'*`marginal'*c.trt#c.trt
 		mat B[`i', 1] = `r(estimate)' 													// beta
@@ -421,20 +421,47 @@ pause on
 		tostring mlabel, replace force format(%9.1f)
 	replace mlabel = mlabel + "%"
 
+	*Create dynamic transparency
+	loc cmd_tw // init empty
+	qui sum n
+	loc max `r(max)'
+	count if !mi(country)
+	forval i = 1(1)`r(N)' {
+
+		*Generate transparency scale
+		qui sum n in `i'
+		loc transparency = round(`r(mean)'/`max'*100,1)
+		if `transparency' < 50 	loc outlinetrans 50
+		else 					loc outlinetrans `transparency'
+		di "`transparency'"
+
+		*Manually modify orientation of label
+		loc mlabp // init empty
+		if inlist(`i', 1, 10, 11) 	loc mlabp 10 								// top left
+		else if inlist(`i', 6, 8) 	loc mlabp 4 								// bottom right
+		else 						loc mlabp 2 								// top right
+
+		*Dynamically assign transparency
+		loc cmd_tw `cmd_tw' (scatter beta treatment in `i', 					/// Point
+			m(D) mcolor("0 110 185%`transparency'") mlc("0 110 185%`outlinetrans'")	///
+			mlabel(mlabel) mlabp(`mlabp') mlabs(*.6) mlabc("0 110 185%70")) 
+	}
+	// end forvai i = 1(1)`r(N)'
+	
+	*Display effects
+	di `"`cmd_tw'"'
 
 	*Plot twoway
 	set scheme s1color
-	tw ///
-		(scatter  	beta treatment 			if !mi(country), 					/// Point
-			m(Dh) mlc("0 110 185") 												///
-		mlabel(mlabel) mlabp(2) mlabs(*.6) mlabc("0 110 185"%70))			///  
-		(line 		beta treatment 			if mi(country)) 					///
-		(rarea     lo_2se hi_2se treatment  if mi(country), 					///
-			fcolor(grey%20)), 													///
+	tw 	(line 		beta treatment 			if mi(country), 					///
+			lwidth(thick) lcolor("129 181 60%70"))								///
+		`cmd_tw',																/// Load dynamically assigned points
+		xlab(0 "\$0" 1 "\$1.00" 2 "\$2.00" 3 "\$3.00" 4 "\$4.00" 5 "\$5.00" 6 "\$6.00") ///
+		ylab(-.05 "-5%" 0 "0%" .05 "5%" .10 "10%" .15 "15%") 					///
 		ytitle("Effect of Incentives on Response Rate") 						/// Ytitle
 		xtitle("Incentive Size (2020 USD)") 									///
 		legend(off) 															//
-	
+
 	graph export "`location'/output/cati_rr_lmic_meta.png", replace
 
 
